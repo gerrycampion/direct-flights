@@ -559,6 +559,8 @@
                 <th class="sortable" data-column="country">Country</th>
                 <th class="sortable" data-column="location">Location</th>
                 <th class="sortable" data-column="airportCode">Airport Code</th>
+                <th class="sortable" data-column="distance">Distance (mi)</th>
+                <th class="sortable" data-column="flightTime">Flight Time</th>
                 <th class="sortable" data-column="price">Price Range</th>
                 <th class="sortable" data-column="rate">Exchange Rate</th>
                 <th class="sortable" data-column="monthTrend">
@@ -593,6 +595,20 @@
                   <input
                     type="text"
                     id="filter-airportCode"
+                    placeholder="Filter..."
+                  />
+                </th>
+                <th>
+                  <input
+                    type="text"
+                    id="filter-distance"
+                    placeholder="Filter..."
+                  />
+                </th>
+                <th>
+                  <input
+                    type="text"
+                    id="filter-flightTime"
                     placeholder="Filter..."
                   />
                 </th>
@@ -874,6 +890,27 @@
         return R * c;
       }
 
+      // Estimate flight time based on distance
+      function estimateFlightTime(distanceKm) {
+        const distanceMiles = distanceKm * 0.621371;
+        const averageSpeed = 500; // Average cruising speed in mph
+        const flightTimeHours = distanceMiles / averageSpeed;
+
+        // Add taxi, takeoff, climb, descent time (typically 30-45 min)
+        const totalTimeHours = flightTimeHours + 0.5;
+
+        const hours = Math.floor(totalTimeHours);
+        const minutes = Math.round((totalTimeHours - hours) * 60);
+
+        if (hours === 0) {
+          return `${minutes}m`;
+        } else if (minutes === 0) {
+          return `${hours}h`;
+        } else {
+          return `${hours}h ${minutes}m`;
+        }
+      }
+
       // Search airports by 3-letter IATA code using API Ninjas
       async function searchAirportsAPI(query) {
         if (!API_KEYS.apininjas) {
@@ -1073,6 +1110,7 @@
                     const details = airportDetails[0];
 
                     // Calculate distance and estimate price
+                    let distance = null;
                     let estimatedPrice = { minPrice: 100, maxPrice: 500 };
                     if (
                       departureAirport.latitude &&
@@ -1080,7 +1118,7 @@
                       details.latitude &&
                       details.longitude
                     ) {
-                      const distance = calculateDistance(
+                      distance = calculateDistance(
                         departureAirport.latitude,
                         departureAirport.longitude,
                         details.latitude,
@@ -1088,6 +1126,13 @@
                       );
                       estimatedPrice = estimatePrice(distance);
                     }
+
+                    const distanceMiles = distance
+                      ? Math.round(distance * 0.621371)
+                      : null;
+                    const flightTime = distance
+                      ? estimateFlightTime(distance)
+                      : "N/A";
 
                     return {
                       airportCode: dest.airportCode,
@@ -1098,6 +1143,8 @@
                       currency: details.currency || "USD",
                       minPrice: estimatedPrice.minPrice,
                       maxPrice: estimatedPrice.maxPrice,
+                      distanceMiles: distanceMiles,
+                      flightTime: flightTime,
                     };
                   }
                 } catch (error) {
@@ -1113,6 +1160,8 @@
                 country: dest.country || "Unknown",
                 minPrice: 100,
                 maxPrice: 500,
+                distanceMiles: null,
+                flightTime: "N/A",
               };
             }),
           );
@@ -1445,6 +1494,16 @@
                   .includes(filterValue);
               case "airportCode":
                 return flight.airportCode.toLowerCase().includes(filterValue);
+              case "distance":
+                // Support distance filtering - match numeric values
+                if (flight.distanceMiles === null) return false;
+                return flight.distanceMiles
+                  .toString()
+                  .includes(filterValue.replace(/,/g, ""));
+              case "flightTime":
+                // Filter by flight time string
+                if (flight.flightTime === "N/A") return false;
+                return flight.flightTime.toLowerCase().includes(filterValue);
               case "price":
                 // Support price range filtering like "100-300"
                 const priceMatch = filterValue.match(/(\d+)\s*-\s*(\d+)/);
@@ -1511,6 +1570,8 @@
                                 ${flight.airportCode}
                             </a>
                         </td>
+                        <td>${flight.distanceMiles !== null ? flight.distanceMiles.toLocaleString() : "N/A"}</td>
+                        <td>${flight.flightTime}</td>
                         <td class="price-range">
                             $${flight.minPrice} - $${flight.maxPrice}
                         </td>
@@ -1563,6 +1624,27 @@
             case "airportCode":
               aVal = a.airportCode;
               bVal = b.airportCode;
+              break;
+            case "distance":
+              aVal = a.distanceMiles !== null ? a.distanceMiles : -1;
+              bVal = b.distanceMiles !== null ? b.distanceMiles : -1;
+              break;
+            case "flightTime":
+              // Convert time strings to minutes for comparison
+              const parseTime = (timeStr) => {
+                if (timeStr === "N/A") return -1;
+                const match = timeStr.match(/(\d+)h\s*(\d+)?m?/);
+                if (match) {
+                  const hours = parseInt(match[1]) || 0;
+                  const mins = parseInt(match[2]) || 0;
+                  return hours * 60 + mins;
+                }
+                const minMatch = timeStr.match(/(\d+)m/);
+                if (minMatch) return parseInt(minMatch[1]);
+                return -1;
+              };
+              aVal = parseTime(a.flightTime);
+              bVal = parseTime(b.flightTime);
               break;
             case "price":
               aVal = a.minPrice;
